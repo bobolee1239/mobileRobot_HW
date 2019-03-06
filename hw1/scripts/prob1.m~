@@ -1,0 +1,211 @@
+% ********** HW#1 Prob1 ********************************** %
+% AUTHOR		: Tsung-Han Lee
+% Description	: Simulation of moving a mobile car 
+%				  to destination
+% ******************************************************** %
+clear all ; close all ; clc
+%
+% ********** Parameters ********** %
+% Origin position of car 
+x0 = 0 ; y0 = 0; theta0 = 0 ; 
+
+% Destination, Unit: meter & rad/sec.
+xd = -4 ; yd = -4 ; thetad = pi/2 ;  
+
+% Memory to store our temporary position
+x = 0 ; y = 0; theta = 0 ;			% Initial condition       
+l = .1 ; r = .03 ;                  % Unit: meter
+MAX_WHEEL_SPEED = 300 * pi / 30;                                  
+
+% ********************* Controller *********************** %
+% For eigenvalue of Linear Matrix = -1.5, -3, -4.5 
+% --> roughly: time_constant = 2/3 second, settling time = 8/3 second
+% Control efford: 9000 rad/s
+k_lo = 3 ;
+k_alpha = 9 ;
+k_beta = -9/4 ;
+
+% k_lo = 0.01 ;
+% k_alpha = 0.03 ;
+% k_beta = -0.0125 ;
+%{
+% For eigenvalue of Linear Matrix = -0.4 -1.4 -2.4 
+% --> roughly: time_constant = 2.5 second, settling time = 10 second
+% Control efford: 4000 rad/s
+k_lo = 1.4 ;
+k_alpha = 4.2 ;
+k_beta = -24/35 ; 
+
+
+% For eigenvalue of Linear Matrix = -0.5+0.3j -0.5 -0.5-0.3j 
+% --> stategy: through some overshoot to increase rise time, it works but
+% leads to a longer track 
+% Control efford:  1910 rad/s
+
+k_lo = 0.5 ;
+k_alpha = 1.5 ;
+k_beta = -0.68 ;
+
+% For eigenvalue of Linear Matrix = -0.01 -0.05 -0.09 
+% --> roughly: time_constant = 100 second, settling time = 400 second
+% Control efford: 139 rad/s
+
+k_lo = 0.05 ;
+k_alpha = 0.15 ;
+k_beta = -0.018 ;
+
+%For eigenvalue of Linear Matrix = -0.01-0.005j -0.01 -0.01+0.005j
+% --> roughly: 500 sec to reach, faster than last one
+% Control efford: 37 rad/s = 353 rpm  --> Most possible to implement in our
+% car 
+k_lo = 0.01 ;
+k_alpha = 0.03 ;
+k_beta = -0.0125 ;
+%}
+
+A = [-k_lo 0 0 ;0 (k_lo - k_alpha) -k_beta ; 0 -k_lo 0] ;
+
+
+% ***************** Sampling Setting, Memory Initialization *********%
+Fs = 100 ;							% sampling frequency, Unit: Hz 
+Ts = 1/Fs ;							% sampling interval, Unit: second
+time = 0 ;							% observing time 
+time_axis = (0:1:(time*Fs-1))*Ts ;	% time axis, Unit: second
+len = length(time_axis) ;
+pos_x = zeros(1,len) ;
+pos_y = zeros(1, len) ;
+pos_theta = zeros(1, len) ;
+vel = zeros(3,len);
+pos_W = zeros(2,len) ;				% Index: #1 for left wheel
+									%		 #2 for right wheel 
+									
+% ***** Open following code if you want to create a movie *****
+ %{
+nFrames = 20;
+vidObj = VideoWriter('myTracking.avi');
+vidObj.Quality = 100;
+vidObj.FrameRate = 100;
+open(vidObj);
+%}
+
+for i = 1:1:(length(time_axis)-1)     
+	% NOTE: theta = moving direction  
+	
+    % Calculating errors & feeback 
+    delta_x = xd - x ;
+    delta_y = yd - y ;
+	
+	% actan() range from: -pi ~ pi (wrapping)
+    alpha = -theta + atan2(delta_y, delta_x) ;  
+    beta = -theta + thetad - alpha ;
+    lo = sqrt(delta_x^2 + delta_y^2) ;
+    
+	% apply feedback control law
+    linear_vel = lo*k_lo ;
+    rotation_vel = k_alpha*alpha + k_beta*beta ;
+    
+    % Transfer matrix between d(xc)/dt, d(yc)/dt, w 
+    Transfer = [ cos(theta) 0 ; sin(theta) 0 ; 0 1] ;
+    % Transfer matrix between Wheel and Linear_vel ... 
+    R = [ r/2 r/2 ; -r/2*l r/2*l] ;
+    
+    
+    % Estimate positon and direction
+    Vel = Transfer*([linear_vel rotation_vel].') ;
+    
+    linear_vel_x = Vel(1) ;
+    linear_vel_y = Vel(2) ;
+    W = Vel(3) ;
+    
+    vel(1:3,i+1) = [ linear_vel_x linear_vel_y W ].' ;
+    Wheels_v = inv(R)*([linear_vel rotation_vel].') ;
+    Wl = Wheels_v(1) ;
+    Wr = Wheels_v(2) ;
+	
+	if Wl > MAX_WHEEL_SPEED
+		Wl = MAX_WHEEL_SPEED;
+	end
+	
+	if Wr > MAX_WHEEL_SPEED
+		Wr = MAX_WHEEL_SPEED;
+	end
+    
+    pos_W(1:2,i+1) = [Wl Wr].' ;  % index 1 for left wheel 
+    LRVel = R*[Wl Wr].' ;
+    linear_vel = LRVel(1) ;
+    rotation_vel = LRVel(2) ;
+        
+	Vel = Transfer*([linear_vel rotation_vel].') ;
+    
+    linear_vel_x = Vel(1) ;
+    linear_vel_y = Vel(2) ;
+    W = Vel(3) ;
+    
+    vel(1:3,i+1) = [ linear_vel_x linear_vel_y W ].' ;
+	
+    % update position
+    x = x + linear_vel_x*Ts ;
+    y = y + linear_vel_y*Ts ;
+    theta = theta + W*Ts ;    
+    pos_x(1,i+1) = x ;
+    pos_y(1,i+1) = y ;
+    pos_theta(1,i+1) = theta ;
+   
+    %{
+    figure(1)
+    plot(pos_x(1,i+1), pos_y(1,i+1),'bp')
+    hold on
+    axis([-1.3 0.5 -1.3 0.5]);
+    title('Tracking')
+   
+    
+    writeVideo(vidObj, getframe(gca)); % get video
+    
+    pause(0.5) ; 
+    %}
+end
+%{
+hold off
+close(gcf)
+close(vidObj);
+%}
+
+figure(1)
+plot(pos_x, pos_y,'o')
+title('Tracking')
+
+figure(2)
+plot(time_axis, vel(1,:), 'b','linewidth',2)
+hold on 
+plot(time_axis, vel(2,:), 'r','linewidth',2)
+plot(time_axis, vel(3,:), 'g','linewidth',2)
+hold off 
+xlabel('time (sec.)' )
+ylabel('Velocity (m/s) or Rotation Velocity (rad/s)')
+legend('linear Velocity X','linear Velocity Y','Rotation Velocity')
+
+figure(3)
+plot(time_axis, pos_W(1,:).*(30/pi), 'b','linewidth',2)
+hold on 
+plot(time_axis, pos_W(2,:).*(30/pi), 'r','linewidth',2)
+hold off 
+title('Control Efford')
+xlabel('time (sec.)' )
+ylabel('Rotation Velocity (rpm)')
+legend('Left Wheel Rotation Velocity ','Right Wheel Rotation Velocity ')
+
+figure(4)
+plot(time_axis, pos_x, 'b', 'linewidth', 2)
+hold on 
+plot(time_axis, pos_y, 'r', 'linewidth', 2)
+hold off
+title('Time Response Position')
+xlabel('Time (sec.)')
+ylabel('Position (meter)')
+legend('Position X', 'Position Y')
+
+figure(5)
+plot(time_axis, pos_theta*180/pi, 'g', 'linewidth', 2)
+title('Time Response Angle')
+xlabel('Time (sec.)')
+ylabel('Angle (degree)')
